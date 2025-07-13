@@ -66,11 +66,6 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-# 添加 LLVM feed
-        echo "src-git llvm https://github.com/openwrt/packages-llvm.git" >> feeds.conf
-        ./scripts/feeds update llvm
-        ./scripts/feeds install -p llvm llvm-bpf
-
     - name: Load custom configuration
       run: |
         [ -e files ] && mv files openwrt/files
