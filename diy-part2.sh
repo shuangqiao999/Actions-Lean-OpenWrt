@@ -11,4 +11,4 @@
 # Modify default IP
 # sed -i 's/192.168.1.1/192.168.1.11/g' package/base-files/files/bin/config_generate
 
-sed -i 's@.*CYXluq4wUazHjmCDBCqXF*@#&@g' package/lean/default-settings/files/zzz-default-settings  #设置密码为空
+# sed -i 's@.*CYXluq4wUazHjmCDBCqXF*@#&@g' package/lean/default-settings/files/zzz-default-settings  #设置密码为空
