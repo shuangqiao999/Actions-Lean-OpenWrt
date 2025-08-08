@@ -25,3 +25,7 @@ echo "CONFIG_PACKAGE_smartdns-ui=y" >> .config
 echo "CONFIG_OPENSSL_WITH_QUIC=y" >> .config
 # echo "CONFIG_OPENSSL_WITH_KTLS=y" >> .config
 echo "SmartDNS 插件切换完成"
+
+git clone https://github.com/muink/openwrt-einat-ebpf.git package/einat-ebpf
+
+git clone https://github.com/muink/luci-app-einat.git package/luci-app-einat
