@@ -12,6 +12,6 @@
 #sed -i 's/192.168.1.1/192.168.1.11/g' package/base-files/files/bin/config_generate
 
 
-git clone https://github.com/shuangqiao999/openwrt-einat-ebpf.git package/einat-ebpf
+#git clone https://github.com/shuangqiao999/openwrt-einat-ebpf.git package/einat-ebpf
 
-git clone https://github.com/shuangqiao999/luci-app-einat.git package/luci-app-einat
+#git clone https://github.com/shuangqiao999/luci-app-einat.git package/luci-app-einat
