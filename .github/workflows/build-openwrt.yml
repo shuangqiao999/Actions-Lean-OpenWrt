@@ -27,6 +27,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    resources:
+      memory: 16GB  # 增加16GB内存的配置
 
     steps:
     - name: Checkout
