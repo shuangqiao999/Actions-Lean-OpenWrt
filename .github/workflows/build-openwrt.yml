@@ -46,16 +46,7 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
         
-    # ============= 添加16GB虚拟内存 =============
-    - name: Setup 16GB swap space
-      run: |
-        sudo dd if=/dev/zero of=/swapfile bs=1G count=8
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        echo "Swap space created:"
-        free -h
-    # ==========================================
+    
 
     - name: Clone source code
       working-directory: /workdir
@@ -105,15 +96,7 @@ jobs:
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
         
-    # ============= 清理虚拟内存 =============
-    - name: Cleanup swap space
-      if: always()
-      run: |
-        sudo swapoff /swapfile
-        sudo rm -f /swapfile
-        echo "Swap space removed:"
-        free -h
-    # =======================================
+    
 
     - name: Check space usage
       if: (!cancelled())
