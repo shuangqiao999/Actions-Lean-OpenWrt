@@ -15,3 +15,5 @@
 #git clone https://github.com/shuangqiao999/openwrt-einat-ebpf.git package/einat-ebpf
 
 #git clone https://github.com/shuangqiao999/luci-app-einat.git package/luci-app-einat
+
+git clone https://github.com/k13132/openwrt-dpdk.git package/dpdk
