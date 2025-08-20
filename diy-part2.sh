@@ -18,4 +18,4 @@ git clone https://github.com/sbwml/luci-app-filemanager.git package/luci-app-fil
 
 #git clone https://github.com/k13132/openwrt-dpdk.git package/dpdk
 
-curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh && bash add_turboacc.sh
+#curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh && bash add_turboacc.sh
