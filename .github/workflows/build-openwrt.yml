@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 env:
-    REPO_URL: https://github.com/shuangqiao999/openwrt
+  REPO_URL: https://github.com/shuangqiao999/openwrt
   REPO_BRANCH: 24.1
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: x86_64_mini.config
