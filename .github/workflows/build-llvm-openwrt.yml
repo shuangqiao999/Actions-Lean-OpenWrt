@@ -69,7 +69,7 @@ jobs:
         echo "启用LLVM/Clang编译选项"
         cd openwrt
         echo "CONFIG_USE_LLVM=y" >> .config
-        echo "CONFIG_USE_LD=bfd" >> .config  # 或者使用 "CONFIG_USE_LLD=y" 如果你确定要使用LLD
+        echo "CONFIG_USE_LLD=y" >> .config  # 或者使用 "CONFIG_USE_LLD=y" 如果你确定要使用LLD
         echo "CONFIG_KERNEL_LLVM=y" >> .config
 
     - name: Load custom configuration
