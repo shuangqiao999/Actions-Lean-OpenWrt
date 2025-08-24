@@ -14,6 +14,7 @@ env:
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
+  UPLOAD_GOFILE: false  # 添加缺失的环境变量
   TZ: Asia/Shanghai
 
 jobs:
@@ -67,11 +68,9 @@ jobs:
       run: |
         echo "启用LLVM/Clang编译选项"
         cd openwrt
-        cat >> .config <<EOF
-CONFIG_USE_LLVM=y
-CONFIG_USE_LLD=y
-CONFIG_KERNEL_LLVM=y
-EOF
+        echo "CONFIG_USE_LLVM=y" >> .config
+        echo "CONFIG_USE_LD=bfd" >> .config  # 或者使用 "CONFIG_USE_LLD=y" 如果你确定要使用LLD
+        echo "CONFIG_KERNEL_LLVM=y" >> .config
 
     - name: Load custom configuration
       run: |
@@ -134,7 +133,10 @@ EOF
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
-        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
+        # 修复条件判断语法
+        if [ "$UPLOAD_GOFILE" = "true" ]; then
+          echo "🔗 GoFile upload is enabled" >> release.txt
+        fi
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
