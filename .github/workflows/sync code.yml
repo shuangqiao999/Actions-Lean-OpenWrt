@@ -1,0 +1,47 @@
+name: Sync Upstream Code
+
+on:
+  workflow_dispatch:  # 允许手动触发
+  schedule:
+    - cron: '0 0 * * *'  # 每天自动同步一次（UTC时间）
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出当前仓库代码
+      uses: actions/checkout@v4
+      with:
+        ref: 24.1
+        fetch-depth: 0  # 获取所有历史记录
+
+    - name: 添加上游仓库
+      run: |
+        git remote add upstream https://github.com/Lienol/openwrt
+        git fetch upstream
+
+    - name: 尝试合并上游代码（跳过冲突）
+      run: |
+        # 尝试合并，但允许失败（因为有冲突）
+        git merge --no-commit --no-ff upstream/24.10 || true
+        
+        # 检查是否有未解决的冲突
+        if git diff --name-only --diff-filter=U | grep -q '.'; then
+          echo "发现冲突文件，正在重置这些文件..."
+          # 重置有冲突的文件到我们的版本
+          git diff --name-only --diff-filter=U | while read file; do
+            git checkout HEAD -- "$file"
+          done
+          # 完成合并（跳过冲突的文件）
+          git commit -m "Merge upstream/24.10 (skipping conflicts)" --no-verify
+        else
+          # 如果没有冲突，正常提交
+          git commit -m "Merge upstream/24.10" --no-verify
+        fi
+
+    - name: 推送更改到仓库
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git push origin 24.1
