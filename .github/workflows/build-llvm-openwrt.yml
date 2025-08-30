@@ -14,7 +14,7 @@ env:
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
-  UPLOAD_GOFILE: false  # 添加缺失的环境变量
+  UPLOAD_GOFILE: false
   TZ: Asia/Shanghai
 
 jobs:
@@ -64,13 +64,22 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
+    # 注意：如果.config文件中已经设置了LLVM选项，这里可以注释掉或删除
+    # 以避免重复设置导致冲突
     - name: Setup LLVM/Clang configuration
       run: |
         echo "启用LLVM/Clang编译选项"
         cd openwrt
-        echo "CONFIG_USE_LLVM=y" >> .config
-        echo "CONFIG_USE_LLD=y" >> .config  # 或者使用 "CONFIG_USE_LLD=y" 如果你确定要使用LLD
-        echo "CONFIG_KERNEL_LLVM=y" >> .config
+        # 检查.config文件中是否已有这些设置，避免重复
+        if ! grep -q "CONFIG_USE_LLVM=y" .config; then
+          echo "CONFIG_USE_LLVM=y" >> .config
+        fi
+        if ! grep -q "CONFIG_USE_LLD=y" .config; then
+          echo "CONFIG_USE_LLD=y" >> .config
+        fi
+        if ! grep -q "CONFIG_KERNEL_LLVM=y" .config; then
+          echo "CONFIG_KERNEL_LLVM=y" >> .config
+        fi
 
     - name: Load custom configuration
       run: |
@@ -116,6 +125,11 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
+        # 只保留你需要的固件格式，删除其他格式
+        # 查找并删除不需要的固件文件，只保留squashfs-combined-efi格式
+        find . -maxdepth 1 -type f -name "*.img" ! -name "*squashfs-combined-efi*" -delete
+        find . -maxdepth 1 -type f -name "*.img.gz" ! -name "*squashfs-combined-efi*" -delete
+        # 删除packages目录（如果不需上传）
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
@@ -133,7 +147,6 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
-        # 修复条件判断语法
         if [ "$UPLOAD_GOFILE" = "true" ]; then
           echo "🔗 GoFile upload is enabled" >> release.txt
         fi
