@@ -11,6 +11,8 @@
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.1.11/g' package/base-files/files/bin/config_generate
 
+git clone https://github.com/sbwml/luci-app-filemanager.git package/luci-app-filemanager
+
 
 #git clone https://github.com/shuangqiao999/openwrt-einat-ebpf.git package/einat-ebpf
 
