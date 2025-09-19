@@ -19,8 +19,7 @@ env:
 
 jobs:
   build:
-      runs-on: ubuntu-latest
-
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout
       uses: actions/checkout@main
@@ -64,22 +63,13 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-    # 注意：如果.config文件中已经设置了LLVM选项，这里可以注释掉或删除
-    # 以避免重复设置导致冲突
     - name: Setup LLVM/Clang configuration
       run: |
         echo "启用LLVM/Clang编译选项"
         cd openwrt
-        # 检查.config文件中是否已有这些设置，避免重复
-        if ! grep -q "CONFIG_USE_LLVM=y" .config; then
-          echo "CONFIG_USE_LLVM=y" >> .config
-        fi
-        if ! grep -q "CONFIG_USE_LLD=y" .config; then
-          echo "CONFIG_USE_LLD=y" >> .config
-        fi
-        if ! grep -q "CONFIG_KERNEL_LLVM=y" .config; then
-          echo "CONFIG_KERNEL_LLVM=y" >> .config
-        fi
+        grep -q "CONFIG_USE_LLVM" .config || echo "CONFIG_USE_LLVM=y" >> .config
+        grep -q "CONFIG_USE_LLD" .config || echo "CONFIG_USE_LLD=y" >> .config
+        grep -q "CONFIG_KERNEL_LLVM" .config || echo "CONFIG_KERNEL_LLVM=y" >> .config
 
     - name: Load custom configuration
       run: |
@@ -125,11 +115,7 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        # 只保留你需要的固件格式，删除其他格式
-        # 查找并删除不需要的固件文件，只保留squashfs-combined-efi格式
-        find . -maxdepth 1 -type f -name "*.img" ! -name "*squashfs-combined-efi*" -delete
-        find . -maxdepth 1 -type f -name "*.img.gz" ! -name "*squashfs-combined-efi*" -delete
-        # 删除packages目录（如果不需上传）
+        find . -maxdepth 1 -type f \( -name "*.img" -o -name "*.img.gz" \) ! -name "*combined-efi*" -delete
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
