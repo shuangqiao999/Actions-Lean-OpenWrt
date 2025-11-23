@@ -1,4 +1,4 @@
-name: OpenWrt GCC 优化构建器
+name: OpenWrt GCC Builder
 
 on:
   repository_dispatch:
@@ -21,250 +21,150 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-    - name: 检出代码
-      uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@main
 
-    - name: 安装构建依赖
+    - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt-get update -y
-        sudo apt-get install -y \
-          build-essential ccache cmake curl file g++ gawk gettext git libncurses5-dev \
-          libssl-dev python3 python3-setuptools rsync unzip wget zlib1g-dev \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-          bzip2 cpio device-tree-compiler fastjar flex gperf help2man intltool \
-          libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncursesw5-dev libpython3-dev libreadline-dev libtool \
-          lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 \
-          python3-pyelftools qemu-utils scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl vim xmlto xxd
+        # 清理不必要的文件
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         
-        # 创建工作目录
+        # 更新包列表
+        sudo apt-get update -y
+        
+        # 安装构建依赖（包含GCC工具链）
+        sudo apt-get install -y \
+          ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
+          gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
+          libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+          libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+          libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch \
+          pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
+          rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
+          vim wget xmlto xxd zlib1g-dev gcc g++ make
+        
+        # 清理包缓存
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        
+        # 设置时区
+        sudo timedatectl set-timezone "$TZ"
+        
+        # 创建工作目录并设置权限
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
-    - name: 验证 GCC 工具链
-      run: |
-        echo "=== 验证 GCC 工具链 ==="
-        gcc --version
-        g++ --version
-        ld --version
-        echo "=== 系统信息 ==="
-        uname -a
-        echo "CPU 核心数: $(nproc)"
-
-    - name: 克隆源代码
+    - name: Clone source code
       working-directory: /workdir
       run: |
         df -hT $PWD
-        echo "克隆 OpenWrt 源代码..."
-        git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 加载自定义软件源
+    - name: Load custom feeds
       run: |
-        if [[ -f $FEEDS_CONF ]]; then
-          echo "应用自定义软件源配置..."
-          cp $FEEDS_CONF openwrt/feeds.conf.default
-        fi
-        if [[ -f $DIY_P1_SH ]]; then
-          echo "执行自定义脚本 part1..."
-          chmod +x $DIY_P1_SH
-          cd openwrt
-          bash $GITHUB_WORKSPACE/$DIY_P1_SH
-        fi
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
-    - name: 更新软件源
+    - name: Update feeds
+      run: cd openwrt && ./scripts/feeds update -a
+
+    - name: Install feeds
+      run: cd openwrt && ./scripts/feeds install -a
+
+    - name: Load custom configuration
+      run: |
+        [ -e files ] && mv files openwrt/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: Download package
+      id: package
       run: |
         cd openwrt
-        echo "更新软件源..."
-        ./scripts/feeds update -a
-
-    - name: 安装软件源
-      run: |
-        cd openwrt
-        echo "安装软件源..."
-        ./scripts/feeds install -a
-
-    - name: 设置优化配置
-      run: |
-        cd openwrt
-        echo "设置优化配置..."
-        # 创建基础配置
-        touch .config
-        # 添加 GCC 优化配置
-        {
-          echo "# GCC 优化配置"
-          echo "CONFIG_USE_LLVM=n"
-          echo "CONFIG_USE_LLD=n"
-          echo "CONFIG_KERNEL_LLVM=n"
-          echo "# O3 优化配置"
-          echo "CONFIG_EXTRA_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
-          echo "CONFIG_TARGET_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
-          echo "CONFIG_OPTIMIZE_FOR_SIZE=n"
-          echo "CONFIG_OPTIMIZE_INLINING=y"
-          echo "# 内核优化"
-          echo "CONFIG_KERNEL_OPTIMIZE_O3=y"
-          echo "CONFIG_KERNEL_LTO=y"
-        } >> .config
-
-    - name: 加载自定义配置
-      run: |
-        if [[ -d files ]]; then
-          echo "复制自定义文件..."
-          cp -r files openwrt/files
-        fi
-        if [[ -f $CONFIG_FILE ]]; then
-          echo "应用自定义配置文件..."
-          cp $CONFIG_FILE openwrt/.config
-        fi
-        if [[ -f $DIY_P2_SH ]]; then
-          echo "执行自定义脚本 part2..."
-          chmod +x $DIY_P2_SH
-          cd openwrt
-          bash $GITHUB_WORKSPACE/$DIY_P2_SH
-        fi
-
-    - name: 配置检查
-      run: |
-        cd openwrt
-        echo "执行默认配置..."
         make defconfig
-        echo "=== 优化配置检查 ==="
-        grep "OPTIMIZATION" .config || echo "未找到优化配置"
-        echo "=== GCC 配置检查 ==="
-        grep "GCC" .config | head -10 || echo "未找到 GCC 配置"
-        echo "=== 目标架构配置 ==="
-        grep "TARGET" .config | head -10
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-    - name: 下载软件包
-      run: |
-        cd openwrt
-        echo "下载软件包..."
-        make download -j$(nproc)
-        echo "清理损坏的下载文件..."
-        find dl -size -1024c -delete
-        echo "下载完成"
-
-    - name: 编译固件
+    - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
-        echo "开始编译固件，使用 $(nproc) 个线程..."
-        echo "优化级别: O3 with x86-64-v2"
-        
-        # 设置编译环境
-        export CC=gcc
-        export CXX=g++
-        
-        # 尝试并行编译
-        if make -j$(nproc) V=sc; then
-          echo "status=success" >> $GITHUB_OUTPUT
-          echo "编译成功!"
-        else
-          echo "并行编译失败，尝试单线程详细编译..."
-          if make -j1 V=s; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "编译成功!"
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "编译失败"
-            # 显示前20个错误
-            echo "=== 编译错误摘要 ==="
-            find . -name "*.log" -exec grep -l "error:" {} \; | head -5 | while read logfile; do
-              echo "错误文件: $logfile"
-              grep -i "error:" "$logfile" | head -5
-            done
-            exit 1
-          fi
-        fi
-        
-        # 获取设备信息
-        if grep -q '^CONFIG_TARGET.*DEVICE.*=y' .config; then
-          DEVICE_NAME="_$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')"
-          echo "DEVICE_NAME=${DEVICE_NAME}" >> $GITHUB_ENV
-        else
-          echo "DEVICE_NAME=" >> $GITHUB_ENV
-        fi
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: 检查构建结果
-      if: steps.compile.outputs.status == 'success'
-      run: |
-        cd openwrt
-        echo "=== 构建结果 ==="
-        echo "固件文件:"
-        find bin/targets -name "*.img" -o -name "*.gz" -o -name "*.bin" | head -20
-        echo "=== 目录结构 ==="
-        ls -la bin/targets/
-        echo "=== 固件大小 ==="
-        du -sh bin/targets/*/*
+    - name: Check space usage
+      if: (!cancelled())
+      run: df -hT
 
-    - name: 整理固件文件
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
+    - name: Upload bin directory
+      uses: actions/upload-artifact@main
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+
+    - name: Organize files
       id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        echo "整理固件文件..."
-        # 删除不必要的文件，保留主要固件
+        find . -maxdepth 1 -type f \( -name "*.img" -o -name "*.img.gz" \) ! -name "*combined-efi*" -delete
         rm -rf packages
-        find . -maxdepth 1 -type f \( -name "*.buildinfo" -o -name "*.manifest" -o -name "sha256sums" \) -delete
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
-        echo "=== 最终固件文件 ==="
-        ls -lh
 
-    - name: 上传固件制品
-      uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success'
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt-GCC优化固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
-        retention-days: 7
 
-    - name: 创建发布版本
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
-      uses: softprops/action-gh-release@v1
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        touch release.txt
+        if [ "$UPLOAD_GOFILE" = "true" ]; then
+          echo "🔗 GoFile upload is enabled" >> release.txt
+        fi
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@master
+      if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: gcc-o3-build-$(date +%Y%m%d-%H%M)
-        name: GCC O3 优化 OpenWrt $(date +%Y-%m-%d)
-        body: |
-          OpenWrt 固件使用 GCC 工具链和 O3 优化编译：
-          
-          - 编译器: GCC $(gcc -dumpversion)
-          - 优化级别: O3 with x86-64-v2
-          - 内核优化: O3 + LTO
-          - 构建日期: $(date)
-          - 架构: x86_64
-          
-          特性：
-          - 极致性能优化
-          - 针对现代 CPU 架构优化
-          - 完整的网络加速功能
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
-    - name: 上传到 GoFile
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_GOFILE == 'true'
-      run: |
-        echo "GoFile 上传功能已启用"
-        # 这里可以添加 GoFile 上传逻辑
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 2
 
-    - name: 清理工作空间
-      if: always()
-      run: |
-        echo "清理工作空间..."
-        sudo rm -rf /workdir/openwrt
-        rm -rf openwrt || true
-        echo "清理完成"
-
-    - name: 构建统计
-      if: always()
-      run: |
-        echo "=== 构建统计 ==="
-        echo "构建状态: ${{ steps.compile.outputs.status }}"
-        echo "设备名称: ${{ env.DEVICE_NAME }}"
-        echo "构建时间: ${{ env.FILE_DATE }}"
-        echo "工作流完成时间: $(date)"
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@master
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
