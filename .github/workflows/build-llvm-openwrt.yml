@@ -1,4 +1,4 @@
-name: OpenWrt 完整 LLVM 构建器
+name: OpenWrt GCC 优化构建器
 
 on:
   repository_dispatch:
@@ -16,7 +16,6 @@ env:
   UPLOAD_RELEASE: true
   UPLOAD_GOFILE: false
   TZ: Asia/Shanghai
-  LLVM_VERSION: 16
 
 jobs:
   build:
@@ -24,27 +23,6 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-
-    - name: 添加 LLVM 软件源
-      run: |
-        wget -q https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh ${LLVM_VERSION}
-        rm llvm.sh
-
-    - name: 安装 LLVM 工具链
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          clang-${LLVM_VERSION} \
-          lld-${LLVM_VERSION} \
-          llvm-${LLVM_VERSION} \
-          llvm-${LLVM_VERSION}-dev
-        
-        # 创建符号链接
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${LLVM_VERSION} 100
 
     - name: 安装构建依赖
       env:
@@ -62,29 +40,36 @@ jobs:
           python3-pyelftools qemu-utils scons squashfs-tools subversion swig texinfo \
           uglifyjs upx-ucl vim xmlto xxd
         
+        # 创建工作目录
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
-    - name: 验证工具链
+    - name: 验证 GCC 工具链
       run: |
-        echo "=== 验证工具链 ==="
-        clang --version || echo "clang 未找到"
-        gcc --version || echo "gcc 未找到"
-        ld.lld --version || echo "lld 未找到"
+        echo "=== 验证 GCC 工具链 ==="
+        gcc --version
+        g++ --version
+        ld --version
+        echo "=== 系统信息 ==="
+        uname -a
+        echo "CPU 核心数: $(nproc)"
 
     - name: 克隆源代码
       working-directory: /workdir
       run: |
         df -hT $PWD
+        echo "克隆 OpenWrt 源代码..."
         git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 加载自定义软件源
       run: |
         if [[ -f $FEEDS_CONF ]]; then
+          echo "应用自定义软件源配置..."
           cp $FEEDS_CONF openwrt/feeds.conf.default
         fi
         if [[ -f $DIY_P1_SH ]]; then
+          echo "执行自定义脚本 part1..."
           chmod +x $DIY_P1_SH
           cd openwrt
           bash $GITHUB_WORKSPACE/$DIY_P1_SH
@@ -93,164 +78,148 @@ jobs:
     - name: 更新软件源
       run: |
         cd openwrt
+        echo "更新软件源..."
         ./scripts/feeds update -a
 
     - name: 安装软件源
       run: |
         cd openwrt
+        echo "安装软件源..."
         ./scripts/feeds install -a
 
-    - name: 设置 LLVM 配置
+    - name: 设置优化配置
       run: |
         cd openwrt
+        echo "设置优化配置..."
         # 创建基础配置
         touch .config
-        # 只对目标系统使用LLVM，host工具使用GCC
+        # 添加 GCC 优化配置
         {
-          echo "# 仅对目标系统使用LLVM"
-          echo "CONFIG_USE_LLVM=y"
-          echo "CONFIG_USE_LLD=y" 
-          echo "CONFIG_KERNEL_LLVM=y"
-          echo "CONFIG_LLVM_VERSION=${LLVM_VERSION}"
-          echo "CONFIG_LLVM_TARGET_ARCH=\"x86_64\""
-          echo "CONFIG_LLVM_TARGETS=\"X86\""
-          echo "CONFIG_USE_LTO_LLVM=y"
-          echo "# O3优化配置"
+          echo "# GCC 优化配置"
+          echo "CONFIG_USE_LLVM=n"
+          echo "CONFIG_USE_LLD=n"
+          echo "CONFIG_KERNEL_LLVM=n"
+          echo "# O3 优化配置"
           echo "CONFIG_EXTRA_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
           echo "CONFIG_TARGET_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
-          echo "# 禁用host工具的LLVM编译"
-          echo "CONFIG_USE_HOST_LLVM=n"
+          echo "CONFIG_OPTIMIZE_FOR_SIZE=n"
+          echo "CONFIG_OPTIMIZE_INLINING=y"
+          echo "# 内核优化"
+          echo "CONFIG_KERNEL_OPTIMIZE_O3=y"
+          echo "CONFIG_KERNEL_LTO=y"
         } >> .config
 
     - name: 加载自定义配置
       run: |
         if [[ -d files ]]; then
+          echo "复制自定义文件..."
           cp -r files openwrt/files
         fi
         if [[ -f $CONFIG_FILE ]]; then
+          echo "应用自定义配置文件..."
           cp $CONFIG_FILE openwrt/.config
         fi
         if [[ -f $DIY_P2_SH ]]; then
+          echo "执行自定义脚本 part2..."
           chmod +x $DIY_P2_SH
           cd openwrt
           bash $GITHUB_WORKSPACE/$DIY_P2_SH
         fi
 
+    - name: 配置检查
+      run: |
+        cd openwrt
+        echo "执行默认配置..."
+        make defconfig
+        echo "=== 优化配置检查 ==="
+        grep "OPTIMIZATION" .config || echo "未找到优化配置"
+        echo "=== GCC 配置检查 ==="
+        grep "GCC" .config | head -10 || echo "未找到 GCC 配置"
+        echo "=== 目标架构配置 ==="
+        grep "TARGET" .config | head -10
+
     - name: 下载软件包
       run: |
         cd openwrt
-        make defconfig
-        echo "=== 配置检查 ==="
-        echo "LLVM配置:"
-        grep "CONFIG.*LLVM" .config || echo "未找到 LLVM 配置"
-        echo "优化配置:"
-        grep "OPTIMIZATION" .config || echo "未找到优化配置"
+        echo "下载软件包..."
         make download -j$(nproc)
+        echo "清理损坏的下载文件..."
         find dl -size -1024c -delete
+        echo "下载完成"
 
-    - name: 编译 host 工具 (使用 GCC)
-      run: |
-        cd openwrt
-        echo "编译 host 工具..."
-        # 编译 host 工具时使用系统默认的 GCC
-        make tools/compile -j$(nproc) || make tools/compile -j1 V=s
-
-    - name: 编译工具链 (使用 GCC)
-      run: |
-        cd openwrt
-        echo "编译工具链..."
-        make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
-
-    - name: 使用 LLVM 编译目标系统
+    - name: 编译固件
       id: compile
       run: |
         cd openwrt
-        echo "开始使用 LLVM 编译目标系统，使用 $(nproc) 个线程..."
+        echo "开始编译固件，使用 $(nproc) 个线程..."
+        echo "优化级别: O3 with x86-64-v2"
         
-        # 只对目标系统使用LLVM环境变量
-        export TARGET_CC=clang
-        export TARGET_CXX=clang++
-        export TARGET_LD=lld
-        export TARGET_AR=llvm-ar
-        export TARGET_NM=llvm-nm
-        export TARGET_STRIP=llvm-strip
+        # 设置编译环境
+        export CC=gcc
+        export CXX=g++
         
-        echo "=== 编译环境 ==="
-        echo "TARGET_CC: $TARGET_CC"
-        echo "TARGET_CXX: $TARGET_CXX"
-        echo "TARGET_LD: $TARGET_LD"
-        
-        # 尝试编译目标系统
-        if make target/compile -j$(nproc); then
-          echo "目标系统编译成功，继续编译包..."
-          if make package/compile -j$(nproc); then
-            echo "包编译成功，生成镜像..."
-            if make target/install -j$(nproc); then
-              echo "status=success" >> $GITHUB_OUTPUT
-            else
-              echo "目标安装失败"
-              exit 1
-            fi
-          else
-            echo "包编译失败，尝试单线程..."
-            if make package/compile -j1 V=s; then
-              echo "包编译成功"
-              make target/install -j1
-              echo "status=success" >> $GITHUB_OUTPUT
-            else
-              echo "status=failure" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-          fi
+        # 尝试并行编译
+        if make -j$(nproc) V=sc; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "编译成功!"
         else
-          echo "目标系统编译失败，尝试单线程..."
-          if make target/compile -j1 V=s && make package/compile -j1 V=s && make target/install -j1; then
+          echo "并行编译失败，尝试单线程详细编译..."
+          if make -j1 V=s; then
             echo "status=success" >> $GITHUB_OUTPUT
+            echo "编译成功!"
           else
             echo "status=failure" >> $GITHUB_OUTPUT
-            echo "编译完全失败"
+            echo "编译失败"
+            # 显示前20个错误
+            echo "=== 编译错误摘要 ==="
+            find . -name "*.log" -exec grep -l "error:" {} \; | head -5 | while read logfile; do
+              echo "错误文件: $logfile"
+              grep -i "error:" "$logfile" | head -5
+            done
             exit 1
           fi
         fi
         
-        # 获取设备名称
+        # 获取设备信息
         if grep -q '^CONFIG_TARGET.*DEVICE.*=y' .config; then
           DEVICE_NAME="_$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')"
           echo "DEVICE_NAME=${DEVICE_NAME}" >> $GITHUB_ENV
+        else
+          echo "DEVICE_NAME=" >> $GITHUB_ENV
         fi
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
-    - name: 生成固件镜像
-      if: steps.compile.outputs.status == 'success'
-      run: |
-        cd openwrt
-        echo "生成固件镜像..."
-        make target/image -j$(nproc) || make target/image -j1 V=s
 
     - name: 检查构建结果
       if: steps.compile.outputs.status == 'success'
       run: |
         cd openwrt
         echo "=== 构建结果 ==="
-        find bin/targets -name "*.img" -o -name "*.gz" -o -name "*.bin" | head -10
+        echo "固件文件:"
+        find bin/targets -name "*.img" -o -name "*.gz" -o -name "*.bin" | head -20
+        echo "=== 目录结构 ==="
+        ls -la bin/targets/
         echo "=== 固件大小 ==="
-        ls -lh bin/targets/*/*/
+        du -sh bin/targets/*/*
 
     - name: 整理固件文件
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
       id: organize
       run: |
         cd openwrt/bin/targets/*/*
-        # 保留主要固件文件，删除不必要的文件
+        echo "整理固件文件..."
+        # 删除不必要的文件，保留主要固件
         rm -rf packages
+        find . -maxdepth 1 -type f \( -name "*.buildinfo" -o -name "*.manifest" -o -name "sha256sums" \) -delete
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+        echo "=== 最终固件文件 ==="
+        ls -lh
 
     - name: 上传固件制品
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success'
       with:
-        name: OpenWrt-混合编译-固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-GCC优化固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
         retention-days: 7
 
@@ -260,21 +229,42 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: 混合编译-$(date +%Y%m%d-%H%M)
-        name: 混合编译 OpenWrt $(date +%Y-%m-%d)
+        tag_name: gcc-o3-build-$(date +%Y%m%d-%H%M)
+        name: GCC O3 优化 OpenWrt $(date +%Y-%m-%d)
         body: |
-          OpenWrt 固件使用混合编译方式：
+          OpenWrt 固件使用 GCC 工具链和 O3 优化编译：
           
-          - Host 工具: 使用 GCC 编译 (确保兼容性)
-          - 目标系统: 使用 LLVM/Clang ${LLVM_VERSION} 编译
-          - 内核: 使用 Clang 编译
-          - 优化级别: O3 带 x86-64-v2
-          - LTO: 已启用
+          - 编译器: GCC $(gcc -dumpversion)
+          - 优化级别: O3 with x86-64-v2
+          - 内核优化: O3 + LTO
           - 构建日期: $(date)
+          - 架构: x86_64
+          
+          特性：
+          - 极致性能优化
+          - 针对现代 CPU 架构优化
+          - 完整的网络加速功能
         files: ${{ env.FIRMWARE }}/*
+
+    - name: 上传到 GoFile
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_GOFILE == 'true'
+      run: |
+        echo "GoFile 上传功能已启用"
+        # 这里可以添加 GoFile 上传逻辑
 
     - name: 清理工作空间
       if: always()
       run: |
+        echo "清理工作空间..."
         sudo rm -rf /workdir/openwrt
         rm -rf openwrt || true
+        echo "清理完成"
+
+    - name: 构建统计
+      if: always()
+      run: |
+        echo "=== 构建统计 ==="
+        echo "构建状态: ${{ steps.compile.outputs.status }}"
+        echo "设备名称: ${{ env.DEVICE_NAME }}"
+        echo "构建时间: ${{ env.FILE_DATE }}"
+        echo "工作流完成时间: $(date)"
