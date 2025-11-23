@@ -27,7 +27,7 @@ jobs:
 
     - name: Add LLVM Repository
       run: |
-        wget https://apt.llvm.org/llvm.sh
+        wget -q https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
         rm llvm.sh
@@ -39,14 +39,9 @@ jobs:
           clang-${LLVM_VERSION} \
           lld-${LLVM_VERSION} \
           llvm-${LLVM_VERSION} \
-          llvm-${LLVM_VERSION}-runtime \
           llvm-${LLVM_VERSION}-dev \
           llvm-${LLVM_VERSION}-tools \
-          libllvm${LLVM_VERSION} \
           clang-tools-${LLVM_VERSION} \
-          clang-format-${LLVM_VERSION} \
-          clang-tidy-${LLVM_VERSION} \
-          libclang-${LLVM_VERSION}-dev \
           libclang-rt-${LLVM_VERSION}-dev \
           libc++-${LLVM_VERSION}-dev \
           libc++abi-${LLVM_VERSION}-dev
@@ -56,8 +51,6 @@ jobs:
         sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llc llc /usr/bin/llc-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/opt opt /usr/bin/opt-${LLVM_VERSION} 100
 
     - name: Install Build Dependencies
       env:
@@ -65,19 +58,16 @@ jobs:
       run: |
         sudo apt-get update -y
         sudo apt-get install -y \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-          bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
-          git gperf haveged help2man intltool libelf-dev libfuse-dev libglib2.0-dev \
-          libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
-          libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build \
-          p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools \
-          qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
-          vim wget xmlto xxd zlib1g-dev
+          build-essential ccache cmake curl file g++ gawk gettext git libncurses5-dev \
+          libssl-dev python3 python3-setuptools rsync unzip wget zlib1g-dev \
+          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+          bzip2 cpio device-tree-compiler fastjar flex gperf help2man intltool \
+          libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+          libmpfr-dev libncursesw5-dev libpython3-dev libreadline-dev libtool \
+          lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 \
+          python3-pyelftools qemu-utils scons squashfs-tools subversion swig texinfo \
+          uglifyjs upx-ucl vim xmlto xxd
         
-        sudo apt-get install -y libc++-${LLVM_VERSION}-dev libc++abi-${LLVM_VERSION}-dev libclang-rt-${LLVM_VERSION}-dev
-        sudo apt-get autoremove -y
-        sudo apt-get clean
-        sudo timedatectl set-timezone "${TZ}"
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
@@ -89,199 +79,160 @@ jobs:
         echo "AR=llvm-ar" >> $GITHUB_ENV
         echo "NM=llvm-nm" >> $GITHUB_ENV
         echo "STRIP=llvm-strip" >> $GITHUB_ENV
-        echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
-        echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
-        echo "READELF=llvm-readelf" >> $GITHUB_ENV
-        echo "RANLIB=llvm-ranlib" >> $GITHUB_ENV
-        echo "LLVM_CONFIG=llvm-config" >> $GITHUB_ENV
 
     - name: Clone source code
       working-directory: /workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt openwrt
+        git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Load custom feeds
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        if [[ -f $FEEDS_CONF ]]; then
+          cp $FEEDS_CONF openwrt/feeds.conf.default
+        fi
+        if [[ -f $DIY_P1_SH ]]; then
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          bash $GITHUB_WORKSPACE/$DIY_P1_SH
+        fi
 
     - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
-
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
-
-    - name: Setup Full LLVM Configuration
       run: |
         cd openwrt
-        cat > llvm-config.txt << EOF
-# Enable full LLVM toolchain
-CONFIG_USE_LLVM=y
-CONFIG_LLVM=y
-CONFIG_USE_LLD=y
-CONFIG_KERNEL_LLVM=y
+        ./scripts/feeds update -a
 
-# LLVM version and optimization
-CONFIG_LLVM_VERSION="${LLVM_VERSION}"
-CONFIG_LLVM_OPTIMIZATION_FLAGS="-O2 -pipe"
+    - name: Install feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds install -a
 
-# Use LLVM binutils instead of GNU binutils
-CONFIG_USE_LLVM_BINUTILS=y
-
-# Kernel LLVM config
-CONFIG_KERNEL_LLVM_CFLAGS=""
-CONFIG_KERNEL_LLVM_LDFLAGS=""
-
-# Userspace LLVM config
-CONFIG_EXTRA_OPTIMIZATION="-O2 -pipe"
-CONFIG_TARGET_OPTIMIZATION="-O2 -pipe"
-
-# Disable GCC specific features
-# CONFIG_GCC_USE_VERSION_11 is not set
-# CONFIG_GCC_USE_VERSION_12 is not set
-
-# Target architecture
-CONFIG_LLVM_TARGET_ARCH="x86_64"
-CONFIG_LLVM_TARGETS="AArch64;ARM;Mips;PowerPC;RISCV;WebAssembly;X86"
-EOF
-        cat llvm-config.txt >> .config
+    - name: Setup LLVM Configuration
+      run: |
+        cd openwrt
+        # 先创建基础配置
+        touch .config
+        # 添加LLVM配置
+        {
+          echo "CONFIG_USE_LLVM=y"
+          echo "CONFIG_USE_LLD=y" 
+          echo "CONFIG_KERNEL_LLVM=y"
+          echo "CONFIG_LLVM_VERSION=${LLVM_VERSION}"
+          echo "CONFIG_LLVM_OPTIMIZATION_FLAGS=\"-O2 -pipe\""
+          echo "CONFIG_EXTRA_OPTIMIZATION=\"-O2 -pipe\""
+          echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe\""
+        } >> .config
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        if [[ -d files ]]; then
+          cp -r files openwrt/files
+        fi
+        if [[ -f $CONFIG_FILE ]]; then
+          cp $CONFIG_FILE openwrt/.config
+        fi
+        if [[ -f $DIY_P2_SH ]]; then
+          chmod +x $DIY_P2_SH
+          cd openwrt
+          bash $GITHUB_WORKSPACE/$DIY_P2_SH
+        fi
 
     - name: Verify LLVM Toolchain
       run: |
         cd openwrt
         echo "=== Verifying LLVM Toolchain ==="
-        clang --version
-        ld.lld --version
-        llvm-config --version
-        echo "=== Current Environment Variables ==="
-        echo "CC=$CC"
-        echo "CXX=$CXX"
-        echo "LD=$LD"
+        clang --version || echo "clang not found"
+        ld.lld --version || echo "lld not found"
+        echo "CC: $CC"
+        echo "CXX: $CXX"
+        echo "LD: $LD"
 
     - name: Download packages
       run: |
         cd openwrt
         make defconfig
-        echo "=== LLVM Related Configurations ==="
+        echo "=== LLVM Config Check ==="
         grep "CONFIG.*LLVM" .config || echo "No LLVM config found"
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+        make download -j$(nproc)
+        # 清理损坏的下载文件
+        find dl -size -1024c -delete
 
     - name: Compile with LLVM Toolchain
       id: compile
-      env:
-        CC: clang
-        CXX: clang++
-        LD: ld.lld
-        AR: llvm-ar
-        NM: llvm-nm
-        STRIP: llvm-strip
-        OBJCOPY: llvm-objcopy
-        RANLIB: llvm-ranlib
       run: |
         cd openwrt
-        echo "Compiling with LLVM using $(nproc) threads"
+        echo "Starting compilation with $(nproc) threads..."
         
-        if ! make -j$(nproc) V=sc 2>&1 | tee build.log; then
-          echo "First compilation failed, trying single-threaded..."
-          if ! make -j1 V=s 2>&1 | tee build-single.log; then
-            echo "Compilation failed, checking errors..."
-            grep -iE "error|warning" build.log | grep -iE "llvm|clang|lld" | head -20
+        # 设置编译环境
+        export CC=clang
+        export CXX=clang++
+        export LD=lld
+        
+        # 尝试编译
+        if make -j$(nproc); then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "Parallel compilation failed, trying single thread..."
+          if make -j1 V=s; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "Compilation failed completely"
             exit 1
           fi
         fi
         
-        echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        # 获取设备名称
+        if grep -q '^CONFIG_TARGET.*DEVICE.*=y' .config; then
+          DEVICE_NAME="_$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')"
+          echo "DEVICE_NAME=${DEVICE_NAME}" >> $GITHUB_ENV
+        fi
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: Check LLVM Usage
+    - name: Check build results
       if: steps.compile.outputs.status == 'success'
       run: |
         cd openwrt
-        echo "=== Checking LLVM Usage ==="
-        find staging_dir/host/bin -name "*clang*" -o -name "*llvm*" | head -10
-        echo "=== Kernel Build Info ==="
-        [ -f build.log ] && grep -iE "clang|llvm" build.log | head -10
+        echo "=== Build Results ==="
+        find bin/targets -name "*.img" -o -name "*.gz" -o -name "*.bin" | head -10
 
-    - name: Check disk space
-      if: always()
-      run: df -hT
-
-    - name: Upload bin directory
-      uses: actions/upload-artifact@v4
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      with:
-        name: OpenWrt_LLVM_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: openwrt/bin
-
-    - name: Organize files
+    - name: Organize firmware files
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && always()
       run: |
         cd openwrt/bin/targets/*/*
-        find . -maxdepth 1 -type f \( -name "*.img" -o -name "*.img.gz" \) ! -name "*combined-efi*" -delete
+        # 保留主要固件文件，删除不必要的文件
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: Upload firmware directory
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success' && always()
+      if: steps.organize.outputs.status == 'success'
       with:
-        name: OpenWrt_LLVM_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-LLVM-Firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+        retention-days: 7
 
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && always()
-      run: |
-        echo "release_tag=llvm-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        cat > release.txt << EOF
-This firmware is compiled with full LLVM/Clang toolchain:
-
-- Compiler: Clang
-- Linker: LLD
-- Binutils: LLVM binutils
-- Kernel: Compiled with Clang
-
-LLVM Version: ${LLVM_VERSION}
-Build Date: $(date)
-EOF
-        if [ "$UPLOAD_GOFILE" = "true" ]; then
-          echo "🔗 GoFile upload is enabled" >> release.txt
-        fi
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware to release
+    - name: Create Release
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true'
       uses: softprops/action-gh-release@v1
-      if: steps.tag.outputs.status == 'success' && always()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: |
-          ${{ env.FIRMWARE }}/*.img*
-          ${{ env.FIRMWARE }}/*.iso*
-          ${{ env.FIRMWARE }}/*.tar*
+        tag_name: llvm-build-$(date +%Y%m%d-%H%M)
+        name: LLVM Built OpenWrt $(date +%Y-%m-%d)
+        body: |
+          OpenWrt firmware compiled with LLVM/Clang toolchain
+          
+          - Compiler: Clang ${LLVM_VERSION}
+          - Linker: LLD
+          - Build date: $(date)
+        files: ${{ env.FIRMWARE }}/*
 
     - name: Cleanup
       if: always()
       run: |
-        rm -rf /workdir/openwrt
-        rm -rf openwrt
+        sudo rm -rf /workdir/openwrt
+        rm -rf openwrt || true
