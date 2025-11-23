@@ -46,11 +46,19 @@ jobs:
           libc++-${LLVM_VERSION}-dev \
           libc++abi-${LLVM_VERSION}-dev
         
+        # 创建所有必要的符号链接
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-objdump llvm-objdump /usr/bin/llvm-objdump-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-readelf llvm-readelf /usr/bin/llvm-readelf-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-ranlib llvm-ranlib /usr/bin/llvm-ranlib-${LLVM_VERSION} 100
 
     - name: 安装构建依赖
       env:
@@ -71,6 +79,19 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
+    - name: 验证 LLVM 工具链
+      run: |
+        echo "=== 验证 LLVM 工具链 ==="
+        clang --version || echo "clang 未找到"
+        ld.lld --version || echo "lld 未找到"
+        llvm-ar --version || echo "llvm-ar 未找到"
+        llvm-nm --version || echo "llvm-nm 未找到"
+        llvm-strip --version || echo "llvm-strip 未找到"
+        echo "=== 工具路径 ==="
+        which clang
+        which llvm-ar
+        which llvm-nm
+
     - name: 设置 LLVM 环境
       run: |
         echo "CC=clang" >> $GITHUB_ENV
@@ -79,6 +100,10 @@ jobs:
         echo "AR=llvm-ar" >> $GITHUB_ENV
         echo "NM=llvm-nm" >> $GITHUB_ENV
         echo "STRIP=llvm-strip" >> $GITHUB_ENV
+        echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+        echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+        echo "READELF=llvm-readelf" >> $GITHUB_ENV
+        echo "RANLIB=llvm-ranlib" >> $GITHUB_ENV
 
     - name: 克隆源代码
       working-directory: /workdir
@@ -143,16 +168,6 @@ jobs:
           bash $GITHUB_WORKSPACE/$DIY_P2_SH
         fi
 
-    - name: 验证 LLVM 工具链
-      run: |
-        cd openwrt
-        echo "=== 验证 LLVM 工具链 ==="
-        clang --version || echo "clang 未找到"
-        ld.lld --version || echo "lld 未找到"
-        echo "CC: $CC"
-        echo "CXX: $CXX"
-        echo "LD: $LD"
-
     - name: 下载软件包
       run: |
         cd openwrt
@@ -171,10 +186,25 @@ jobs:
         cd openwrt
         echo "开始使用 O3 优化编译，使用 $(nproc) 个线程..."
         
-        # 设置编译环境
+        # 设置编译环境 - 显式导出所有变量
         export CC=clang
         export CXX=clang++
         export LD=lld
+        export AR=llvm-ar
+        export NM=llvm-nm
+        export STRIP=llvm-strip
+        export OBJCOPY=llvm-objcopy
+        export OBJDUMP=llvm-objdump
+        export READELF=llvm-readelf
+        export RANLIB=llvm-ranlib
+        
+        # 验证环境变量
+        echo "=== 编译环境 ==="
+        echo "CC: $CC"
+        echo "AR: $AR"
+        echo "NM: $NM"
+        which $AR || echo "AR 工具未找到"
+        which $NM || echo "NM 工具未找到"
         
         # 尝试编译
         if make -j$(nproc); then
