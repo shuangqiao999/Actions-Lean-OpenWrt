@@ -32,33 +32,19 @@ jobs:
         sudo ./llvm.sh ${LLVM_VERSION}
         rm llvm.sh
 
-    - name: 安装完整 LLVM/Clang 工具链
+    - name: 安装 LLVM 工具链
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           clang-${LLVM_VERSION} \
           lld-${LLVM_VERSION} \
           llvm-${LLVM_VERSION} \
-          llvm-${LLVM_VERSION}-dev \
-          llvm-${LLVM_VERSION}-tools \
-          clang-tools-${LLVM_VERSION} \
-          libclang-rt-${LLVM_VERSION}-dev \
-          libc++-${LLVM_VERSION}-dev \
-          libc++abi-${LLVM_VERSION}-dev
+          llvm-${LLVM_VERSION}-dev
         
-        # 创建所有必要的符号链接
+        # 创建符号链接
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-${LLVM_VERSION} 100
         sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-objdump llvm-objdump /usr/bin/llvm-objdump-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-readelf llvm-readelf /usr/bin/llvm-readelf-${LLVM_VERSION} 100
-        sudo update-alternatives --install /usr/bin/llvm-ranlib llvm-ranlib /usr/bin/llvm-ranlib-${LLVM_VERSION} 100
 
     - name: 安装构建依赖
       env:
@@ -79,31 +65,12 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
-    - name: 验证 LLVM 工具链
+    - name: 验证工具链
       run: |
-        echo "=== 验证 LLVM 工具链 ==="
+        echo "=== 验证工具链 ==="
         clang --version || echo "clang 未找到"
+        gcc --version || echo "gcc 未找到"
         ld.lld --version || echo "lld 未找到"
-        llvm-ar --version || echo "llvm-ar 未找到"
-        llvm-nm --version || echo "llvm-nm 未找到"
-        llvm-strip --version || echo "llvm-strip 未找到"
-        echo "=== 工具路径 ==="
-        which clang
-        which llvm-ar
-        which llvm-nm
-
-    - name: 设置 LLVM 环境
-      run: |
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "CXX=clang++" >> $GITHUB_ENV
-        echo "LD=lld" >> $GITHUB_ENV
-        echo "AR=llvm-ar" >> $GITHUB_ENV
-        echo "NM=llvm-nm" >> $GITHUB_ENV
-        echo "STRIP=llvm-strip" >> $GITHUB_ENV
-        echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
-        echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
-        echo "READELF=llvm-readelf" >> $GITHUB_ENV
-        echo "RANLIB=llvm-ranlib" >> $GITHUB_ENV
 
     - name: 克隆源代码
       working-directory: /workdir
@@ -136,11 +103,11 @@ jobs:
     - name: 设置 LLVM 配置
       run: |
         cd openwrt
-        # 先创建基础配置
+        # 创建基础配置
         touch .config
-        # 添加优化的LLVM配置
+        # 只对目标系统使用LLVM，host工具使用GCC
         {
-          echo "# 优化的LLVM配置"
+          echo "# 仅对目标系统使用LLVM"
           echo "CONFIG_USE_LLVM=y"
           echo "CONFIG_USE_LLD=y" 
           echo "CONFIG_KERNEL_LLVM=y"
@@ -149,9 +116,10 @@ jobs:
           echo "CONFIG_LLVM_TARGETS=\"X86\""
           echo "CONFIG_USE_LTO_LLVM=y"
           echo "# O3优化配置"
-          echo "CONFIG_LLVM_OPTIMIZATION_FLAGS=\"-O3 -pipe -march=x86-64-v2\""
           echo "CONFIG_EXTRA_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
           echo "CONFIG_TARGET_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
+          echo "# 禁用host工具的LLVM编译"
+          echo "CONFIG_USE_HOST_LLVM=n"
         } >> .config
 
     - name: 加载自定义配置
@@ -172,46 +140,71 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        echo "=== LLVM 配置检查 ==="
+        echo "=== 配置检查 ==="
+        echo "LLVM配置:"
         grep "CONFIG.*LLVM" .config || echo "未找到 LLVM 配置"
-        echo "=== 优化标志 ==="
+        echo "优化配置:"
         grep "OPTIMIZATION" .config || echo "未找到优化配置"
         make download -j$(nproc)
-        # 清理损坏的下载文件
         find dl -size -1024c -delete
 
-    - name: 使用 LLVM 工具链编译
+    - name: 编译 host 工具 (使用 GCC)
+      run: |
+        cd openwrt
+        echo "编译 host 工具..."
+        # 编译 host 工具时使用系统默认的 GCC
+        make tools/compile -j$(nproc) || make tools/compile -j1 V=s
+
+    - name: 编译工具链 (使用 GCC)
+      run: |
+        cd openwrt
+        echo "编译工具链..."
+        make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
+
+    - name: 使用 LLVM 编译目标系统
       id: compile
       run: |
         cd openwrt
-        echo "开始使用 O3 优化编译，使用 $(nproc) 个线程..."
+        echo "开始使用 LLVM 编译目标系统，使用 $(nproc) 个线程..."
         
-        # 设置编译环境 - 显式导出所有变量
-        export CC=clang
-        export CXX=clang++
-        export LD=lld
-        export AR=llvm-ar
-        export NM=llvm-nm
-        export STRIP=llvm-strip
-        export OBJCOPY=llvm-objcopy
-        export OBJDUMP=llvm-objdump
-        export READELF=llvm-readelf
-        export RANLIB=llvm-ranlib
+        # 只对目标系统使用LLVM环境变量
+        export TARGET_CC=clang
+        export TARGET_CXX=clang++
+        export TARGET_LD=lld
+        export TARGET_AR=llvm-ar
+        export TARGET_NM=llvm-nm
+        export TARGET_STRIP=llvm-strip
         
-        # 验证环境变量
         echo "=== 编译环境 ==="
-        echo "CC: $CC"
-        echo "AR: $AR"
-        echo "NM: $NM"
-        which $AR || echo "AR 工具未找到"
-        which $NM || echo "NM 工具未找到"
+        echo "TARGET_CC: $TARGET_CC"
+        echo "TARGET_CXX: $TARGET_CXX"
+        echo "TARGET_LD: $TARGET_LD"
         
-        # 尝试编译
-        if make -j$(nproc); then
-          echo "status=success" >> $GITHUB_OUTPUT
+        # 尝试编译目标系统
+        if make target/compile -j$(nproc); then
+          echo "目标系统编译成功，继续编译包..."
+          if make package/compile -j$(nproc); then
+            echo "包编译成功，生成镜像..."
+            if make target/install -j$(nproc); then
+              echo "status=success" >> $GITHUB_OUTPUT
+            else
+              echo "目标安装失败"
+              exit 1
+            fi
+          else
+            echo "包编译失败，尝试单线程..."
+            if make package/compile -j1 V=s; then
+              echo "包编译成功"
+              make target/install -j1
+              echo "status=success" >> $GITHUB_OUTPUT
+            else
+              echo "status=failure" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          fi
         else
-          echo "并行编译失败，尝试单线程编译..."
-          if make -j1 V=s; then
+          echo "目标系统编译失败，尝试单线程..."
+          if make target/compile -j1 V=s && make package/compile -j1 V=s && make target/install -j1; then
             echo "status=success" >> $GITHUB_OUTPUT
           else
             echo "status=failure" >> $GITHUB_OUTPUT
@@ -226,6 +219,13 @@ jobs:
           echo "DEVICE_NAME=${DEVICE_NAME}" >> $GITHUB_ENV
         fi
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: 生成固件镜像
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt
+        echo "生成固件镜像..."
+        make target/image -j$(nproc) || make target/image -j1 V=s
 
     - name: 检查构建结果
       if: steps.compile.outputs.status == 'success'
@@ -250,7 +250,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success'
       with:
-        name: OpenWrt-LLVM-O3-固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-混合编译-固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
         retention-days: 7
 
@@ -260,13 +260,14 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: llvm-o3-构建-$(date +%Y%m%d-%H%M)
-        name: LLVM O3 优化 OpenWrt $(date +%Y-%m-%d)
+        tag_name: 混合编译-$(date +%Y%m%d-%H%M)
+        name: 混合编译 OpenWrt $(date +%Y-%m-%d)
         body: |
-          使用 LLVM/Clang 工具链和 O3 优化编译的 OpenWrt 固件
+          OpenWrt 固件使用混合编译方式：
           
-          - 编译器: Clang ${LLVM_VERSION}
-          - 链接器: LLD
+          - Host 工具: 使用 GCC 编译 (确保兼容性)
+          - 目标系统: 使用 LLVM/Clang ${LLVM_VERSION} 编译
+          - 内核: 使用 Clang 编译
           - 优化级别: O3 带 x86-64-v2
           - LTO: 已启用
           - 构建日期: $(date)
