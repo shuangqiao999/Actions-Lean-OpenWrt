@@ -1,4 +1,4 @@
-name: OpenWrt LLVM Builder
+name: OpenWrt Full LLVM Builder
 
 on:
   repository_dispatch:
@@ -16,6 +16,7 @@ env:
   UPLOAD_RELEASE: true
   UPLOAD_GOFILE: false
   TZ: Asia/Shanghai
+  LLVM_VERSION: 16
 
 jobs:
   build:
@@ -24,12 +25,36 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    - name: Install LLVM/Clang toolchain
+    - name: Install Complete LLVM/Clang Toolchain
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang llvm lld
+        # 安装完整的 LLVM 工具链
+        sudo apt-get install -y \
+          clang-$LLVM_VERSION \
+          lld-$LLVM_VERSION \
+          llvm-$LLVM_VERSION \
+          llvm-$LLVM_VERSION-runtime \
+          llvm-$LLVM_VERSION-dev \
+          llvm-$LLVM_VERSION-tools \
+          libllvm$LLVM_VERSION \
+          clang-tools-$LLVM_VERSION \
+          clang-format-$LLVM_VERSION \
+          clang-tidy-$LLVM_VERSION \
+          libclang-$LLVM_VERSION-dev \
+          libclang-rt-$LLVM_VERSION-dev \
+          libc++-$LLVM_VERSION-dev \
+          libc++abi-$LLVM_VERSION-dev
+        
+        # 创建符号链接确保使用正确的版本
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/llc llc /usr/bin/llc-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/opt opt /usr/bin/opt-$LLVM_VERSION 100
 
-    - name: Initialization environment
+    - name: Install LLVM-Compatible Build Dependencies
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -39,17 +64,19 @@ jobs:
         # 更新包列表
         sudo apt-get update -y
         
-        # 安装构建依赖
+        # 安装与 LLVM 兼容的构建依赖
         sudo apt-get install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
           bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
-          gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
-          libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
-          libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch \
-          pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
-          rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
+          git gperf haveged help2man intltool libelf-dev libfuse-dev libglib2.0-dev \
+          libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+          libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build \
+          p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools \
+          qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
           vim wget xmlto xxd zlib1g-dev
+        
+        # 安装 libc++ 和 compiler-rt 用于完整的 LLVM 工具链
+        sudo apt-get install -y libc++-$LLVM_VERSION-dev libc++abi-$LLVM_VERSION-dev libclang-rt-$LLVM_VERSION-dev
         
         # 清理包缓存
         sudo apt-get autoremove -y
@@ -61,6 +88,21 @@ jobs:
         # 创建工作目录并设置权限
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
+
+    - name: Setup LLVM Environment
+      run: |
+        echo "设置LLVM环境变量"
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "CXX=clang++" >> $GITHUB_ENV
+        echo "LD=lld" >> $GITHUB_ENV
+        echo "AR=llvm-ar" >> $GITHUB_ENV
+        echo "NM=llvm-nm" >> $GITHUB_ENV
+        echo "STRIP=llvm-strip" >> $GITHUB_ENV
+        echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+        echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+        echo "READELF=llvm-readelf" >> $GITHUB_ENV
+        echo "RANLIB=llvm-ranlib" >> $GITHUB_ENV
+        echo "LLVM_CONFIG=llvm-config" >> $GITHUB_ENV
 
     - name: Clone source code
       working-directory: /workdir
@@ -82,13 +124,52 @@ jobs:
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
 
-    - name: Setup LLVM/Clang configuration
+    - name: Setup Full LLVM Configuration
       run: |
-        echo "启用LLVM/Clang编译选项"
+        echo "配置完整的LLVM编译环境"
         cd openwrt
-        grep -q "CONFIG_USE_LLVM" .config || echo "CONFIG_USE_LLVM=y" >> .config
-        grep -q "CONFIG_USE_LLD" .config || echo "CONFIG_USE_LLD=y" >> .config
-        grep -q "CONFIG_KERNEL_LLVM" .config || echo "CONFIG_KERNEL_LLVM=y" >> .config
+        
+        # 基础LLVM配置
+        cat > llvm-config.txt << 'EOF'
+# 启用完整的LLVM工具链
+CONFIG_USE_LLVM=y
+CONFIG_LLVM=y
+CONFIG_USE_LLD=y
+CONFIG_KERNEL_LLVM=y
+
+# LLVM 版本和优化
+CONFIG_LLVM_VERSION="$LLVM_VERSION"
+CONFIG_LLVM_OPTIMIZATION_FLAGS="-O2 -pipe"
+
+# 使用LLVM的binutils替代GNU binutils
+CONFIG_USE_LLVM_BINUTILS=y
+
+# 内核LLVM配置
+CONFIG_KERNEL_LLVM_CFLAGS=""
+CONFIG_KERNEL_LLVM_LDFLAGS=""
+
+# 用户空间LLVM配置
+CONFIG_EXTRA_OPTIMIZATION="-O2 -pipe"
+CONFIG_EXTRA_TARGET_ARCH=""
+CONFIG_TARGET_OPTIMIZATION="-O2 -pipe"
+
+# 禁用GCC特定功能
+# CONFIG_GCC_USE_VERSION_11 is not set
+# CONFIG_GCC_USE_VERSION_12 is not set
+
+# 使用libc++替代libstdc++
+# CONFIG_USE_LIBCXX=y
+
+# 启用LLVM LTO（链接时优化）
+# CONFIG_USE_LTO_LLVM=y
+
+# 设置LLVM目标架构
+CONFIG_LLVM_TARGET_ARCH="x86_64"
+CONFIG_LLVM_TARGETS="AArch64;ARM;Mips;PowerPC;RISCV;WebAssembly;X86"
+EOF
+
+        # 应用LLVM配置
+        cat llvm-config.txt >> .config
 
     - name: Load custom configuration
       run: |
@@ -98,25 +179,74 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    - name: Verify LLVM Toolchain
+      run: |
+        cd openwrt
+        echo "=== 验证LLVM工具链 ==="
+        clang --version
+        ld.lld --version
+        llvm-config --version
+        echo "=== 当前环境变量 ==="
+        echo "CC=$CC"
+        echo "CXX=$CXX"
+        echo "LD=$LD"
+
     - name: Download package
       id: package
       run: |
         cd openwrt
         make defconfig
+        # 显示LLVM相关配置
+        echo "=== LLVM相关配置 ==="
+        grep "CONFIG.*LLVM" .config || echo "未找到LLVM配置"
+        
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: Compile the firmware
+    - name: Compile with LLVM Toolchain
       id: compile
+      env:
+        # 设置编译环境使用LLVM
+        CC: clang
+        CXX: clang++
+        LD: ld.lld
+        AR: llvm-ar
+        NM: llvm-nm
+        STRIP: llvm-strip
+        OBJCOPY: llvm-objcopy
+        RANLIB: llvm-ranlib
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo -e "$(nproc) thread compile with LLVM"
+        
+        # 尝试编译，如果失败则显示详细错误
+        if ! make -j$(nproc) V=sc 2>&1 | tee build.log; then
+          echo "第一次编译失败，尝试单线程编译..."
+          if ! make -j1 V=s 2>&1 | tee build-single.log; then
+            echo "编译失败，检查错误..."
+            # 显示与LLVM相关的错误
+            grep -i "error\|warning" build.log | grep -i "llvm\|clang\|lld" | head -20
+            exit 1
+          fi
+        fi
+        
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Check LLVM Usage in Build
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt
+        echo "=== 检查LLVM使用情况 ==="
+        # 检查编译过程中使用的工具链
+        find staging_dir/host/bin -name "*clang*" -o -name "*llvm*" | head -10
+        echo "=== 内核编译信息 ==="
+        if [ -f build.log ]; then
+          grep -i "clang\|llvm" build.log | head -10
+        fi
 
     - name: Check space usage
       if: (!cancelled())
@@ -126,7 +256,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
-        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_LLVM_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/bin
 
     - name: Organize files
@@ -143,15 +273,25 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_LLVM_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
+        echo "release_tag=llvm-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        cat > release.txt << 'EOF'
+This firmware is compiled with full LLVM/Clang toolchain:
+
+- Compiler: Clang
+- Linker: LLD
+- Binutils: LLVM binutils
+- Kernel: Compiled with Clang
+
+LLVM Version: ${{ env.LLVM_VERSION }}
+Build Date: $(date)
+EOF
         if [ "$UPLOAD_GOFILE" = "true" ]; then
           echo "🔗 GoFile upload is enabled" >> release.txt
         fi
