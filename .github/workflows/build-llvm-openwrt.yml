@@ -23,48 +23,47 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout
-      uses: actions/checkout@maim
+      uses: actions/checkout@v4
+
+    - name: Add LLVM Repository
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${LLVM_VERSION}
+        rm llvm.sh
 
     - name: Install Complete LLVM/Clang Toolchain
       run: |
         sudo apt-get update
-        # 安装完整的 LLVM 工具链
         sudo apt-get install -y \
-          clang-$LLVM_VERSION \
-          lld-$LLVM_VERSION \
-          llvm-$LLVM_VERSION \
-          llvm-$LLVM_VERSION-runtime \
-          llvm-$LLVM_VERSION-dev \
-          llvm-$LLVM_VERSION-tools \
-          libllvm$LLVM_VERSION \
-          clang-tools-$LLVM_VERSION \
-          clang-format-$LLVM_VERSION \
-          clang-tidy-$LLVM_VERSION \
-          libclang-$LLVM_VERSION-dev \
-          libclang-rt-$LLVM_VERSION-dev \
-          libc++-$LLVM_VERSION-dev \
-          libc++abi-$LLVM_VERSION-dev
+          clang-${LLVM_VERSION} \
+          lld-${LLVM_VERSION} \
+          llvm-${LLVM_VERSION} \
+          llvm-${LLVM_VERSION}-runtime \
+          llvm-${LLVM_VERSION}-dev \
+          llvm-${LLVM_VERSION}-tools \
+          libllvm${LLVM_VERSION} \
+          clang-tools-${LLVM_VERSION} \
+          clang-format-${LLVM_VERSION} \
+          clang-tidy-${LLVM_VERSION} \
+          libclang-${LLVM_VERSION}-dev \
+          libclang-rt-${LLVM_VERSION}-dev \
+          libc++-${LLVM_VERSION}-dev \
+          libc++abi-${LLVM_VERSION}-dev
         
-        # 创建符号链接确保使用正确的版本
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/llc llc /usr/bin/llc-$LLVM_VERSION 100
-        sudo update-alternatives --install /usr/bin/opt opt /usr/bin/opt-$LLVM_VERSION 100
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/llc llc /usr/bin/llc-${LLVM_VERSION} 100
+        sudo update-alternatives --install /usr/bin/opt opt /usr/bin/opt-${LLVM_VERSION} 100
 
-    - name: Install LLVM-Compatible Build Dependencies
+    - name: Install Build Dependencies
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 清理不必要的文件
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        
-        # 更新包列表
         sudo apt-get update -y
-        
-        # 安装与 LLVM 兼容的构建依赖
         sudo apt-get install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
           bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
@@ -75,17 +74,10 @@ jobs:
           qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
           vim wget xmlto xxd zlib1g-dev
         
-        # 安装 libc++ 和 compiler-rt 用于完整的 LLVM 工具链
-        sudo apt-get install -y libc++-$LLVM_VERSION-dev libc++abi-$LLVM_VERSION-dev libclang-rt-$LLVM_VERSION-dev
-        
-        # 清理包缓存
+        sudo apt-get install -y libc++-${LLVM_VERSION}-dev libc++abi-${LLVM_VERSION}-dev libclang-rt-${LLVM_VERSION}-dev
         sudo apt-get autoremove -y
         sudo apt-get clean
-        
-        # 设置时区
-        sudo timedatectl set-timezone "$TZ"
-        
-        # 创建工作目录并设置权限
+        sudo timedatectl set-timezone "${TZ}"
         sudo mkdir -p /workdir
         sudo chown -R $USER:$USER /workdir
 
@@ -108,101 +100,82 @@ jobs:
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        ln -sf /workdir/openwrt openwrt
 
     - name: Load custom feeds
       run: |
-        if [ -e $FEEDS_CONF ]; then
-          mv $FEEDS_CONF openwrt/feeds.conf.default
-        fi
-        if [ -e $DIY_P1_SH ]; then
-          chmod +x $DIY_P1_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
-        fi
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
     - name: Update feeds
-      run: |
-        cd openwrt
-        ./scripts/feeds update -a
+      run: cd openwrt && ./scripts/feeds update -a
 
     - name: Install feeds
-      run: |
-        cd openwrt
-        ./scripts/feeds install -a
+      run: cd openwrt && ./scripts/feeds install -a
 
     - name: Setup Full LLVM Configuration
       run: |
-        echo "配置完整的LLVM编译环境"
         cd openwrt
-        
-        # 基础LLVM配置
-        cat > llvm-config.txt << 'EOF'
-# 启用完整的LLVM工具链
+        cat > llvm-config.txt << EOF
+# Enable full LLVM toolchain
 CONFIG_USE_LLVM=y
 CONFIG_LLVM=y
 CONFIG_USE_LLD=y
 CONFIG_KERNEL_LLVM=y
 
-# LLVM 版本和优化
-CONFIG_LLVM_VERSION=16
+# LLVM version and optimization
+CONFIG_LLVM_VERSION="${LLVM_VERSION}"
 CONFIG_LLVM_OPTIMIZATION_FLAGS="-O2 -pipe"
 
-# 使用LLVM的binutils替代GNU binutils
+# Use LLVM binutils instead of GNU binutils
 CONFIG_USE_LLVM_BINUTILS=y
 
-# 内核LLVM配置
+# Kernel LLVM config
 CONFIG_KERNEL_LLVM_CFLAGS=""
 CONFIG_KERNEL_LLVM_LDFLAGS=""
 
-# 用户空间LLVM配置
+# Userspace LLVM config
 CONFIG_EXTRA_OPTIMIZATION="-O2 -pipe"
-CONFIG_EXTRA_TARGET_ARCH=""
 CONFIG_TARGET_OPTIMIZATION="-O2 -pipe"
 
-# 设置LLVM目标架构
+# Disable GCC specific features
+# CONFIG_GCC_USE_VERSION_11 is not set
+# CONFIG_GCC_USE_VERSION_12 is not set
+
+# Target architecture
 CONFIG_LLVM_TARGET_ARCH="x86_64"
 CONFIG_LLVM_TARGETS="AArch64;ARM;Mips;PowerPC;RISCV;WebAssembly;X86"
 EOF
-
-        # 应用LLVM配置
         cat llvm-config.txt >> .config
 
     - name: Load custom configuration
       run: |
-        if [ -e files ]; then
-          mv files openwrt/files
-        fi
-        if [ -e $CONFIG_FILE ]; then
-          mv $CONFIG_FILE openwrt/.config
-        fi
-        if [ -e $DIY_P2_SH ]; then
-          chmod +x $DIY_P2_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P2_SH
-        fi
+        [ -e files ] && mv files openwrt/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: Verify LLVM Toolchain
       run: |
         cd openwrt
-        echo "=== 验证LLVM工具链 ==="
+        echo "=== Verifying LLVM Toolchain ==="
         clang --version
         ld.lld --version
         llvm-config --version
-        echo "=== 当前环境变量 ==="
+        echo "=== Current Environment Variables ==="
         echo "CC=$CC"
         echo "CXX=$CXX"
         echo "LD=$LD"
 
-    - name: Download package
-      id: package
+    - name: Download packages
       run: |
         cd openwrt
         make defconfig
-        # 显示LLVM相关配置
-        echo "=== LLVM相关配置 ==="
-        grep "CONFIG.*LLVM" .config || echo "未找到LLVM配置"
-        
+        echo "=== LLVM Related Configurations ==="
+        grep "CONFIG.*LLVM" .config || echo "No LLVM config found"
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -220,39 +193,32 @@ EOF
         RANLIB: llvm-ranlib
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile with LLVM"
+        echo "Compiling with LLVM using $(nproc) threads"
         
-        # 尝试编译，如果失败则显示详细错误
         if ! make -j$(nproc) V=sc 2>&1 | tee build.log; then
-          echo "第一次编译失败，尝试单线程编译..."
+          echo "First compilation failed, trying single-threaded..."
           if ! make -j1 V=s 2>&1 | tee build-single.log; then
-            echo "编译失败，检查错误..."
-            # 显示与LLVM相关的错误
-            grep -i "error\|warning" build.log | grep -i "llvm\|clang\|lld" | head -20
+            echo "Compilation failed, checking errors..."
+            grep -iE "error|warning" build.log | grep -iE "llvm|clang|lld" | head -20
             exit 1
           fi
         fi
         
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        if [ -s DEVICE_NAME ]; then
-          echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        fi
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: Check LLVM Usage in Build
+    - name: Check LLVM Usage
       if: steps.compile.outputs.status == 'success'
       run: |
         cd openwrt
-        echo "=== 检查LLVM使用情况 ==="
-        # 检查编译过程中使用的工具链
+        echo "=== Checking LLVM Usage ==="
         find staging_dir/host/bin -name "*clang*" -o -name "*llvm*" | head -10
-        echo "=== 内核编译信息 ==="
-        if [ -f build.log ]; then
-          grep -i "clang\|llvm" build.log | head -10
-        fi
+        echo "=== Kernel Build Info ==="
+        [ -f build.log ] && grep -iE "clang|llvm" build.log | head -10
 
-    - name: Check space usage
+    - name: Check disk space
       if: always()
       run: df -hT
 
@@ -265,7 +231,7 @@ EOF
 
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
+      if: env.UPLOAD_FIRMWARE == 'true' && always()
       run: |
         cd openwrt/bin/targets/*/*
         find . -maxdepth 1 -type f \( -name "*.img" -o -name "*.img.gz" \) ! -name "*combined-efi*" -delete
@@ -275,17 +241,17 @@ EOF
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success'
+      if: steps.organize.outputs.status == 'success' && always()
       with:
         name: OpenWrt_LLVM_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
+      if: env.UPLOAD_RELEASE == 'true' && always()
       run: |
         echo "release_tag=llvm-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        cat > release.txt << 'EOF'
+        cat > release.txt << EOF
 This firmware is compiled with full LLVM/Clang toolchain:
 
 - Compiler: Clang
@@ -293,7 +259,7 @@ This firmware is compiled with full LLVM/Clang toolchain:
 - Binutils: LLVM binutils
 - Kernel: Compiled with Clang
 
-LLVM Version: 16
+LLVM Version: ${LLVM_VERSION}
 Build Date: $(date)
 EOF
         if [ "$UPLOAD_GOFILE" = "true" ]; then
@@ -302,26 +268,20 @@ EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
-      uses: softprops/action-gh-release@v2
-      if: steps.tag.outputs.status == 'success'
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && always()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
+        files: |
+          ${{ env.FIRMWARE }}/*.img*
+          ${{ env.FIRMWARE }}/*.iso*
+          ${{ env.FIRMWARE }}/*.tar*
 
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
-
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.1.3
-      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
-      with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -rf /workdir/openwrt
+        rm -rf openwrt
