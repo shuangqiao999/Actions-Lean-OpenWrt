@@ -113,15 +113,20 @@ jobs:
         cd openwrt
         # 先创建基础配置
         touch .config
-        # 添加LLVM配置
+        # 添加优化的LLVM配置
         {
+          echo "# 优化的LLVM配置"
           echo "CONFIG_USE_LLVM=y"
           echo "CONFIG_USE_LLD=y" 
           echo "CONFIG_KERNEL_LLVM=y"
           echo "CONFIG_LLVM_VERSION=${LLVM_VERSION}"
-          echo "CONFIG_LLVM_OPTIMIZATION_FLAGS=\"-O2 -pipe\""
-          echo "CONFIG_EXTRA_OPTIMIZATION=\"-O2 -pipe\""
-          echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe\""
+          echo "CONFIG_LLVM_TARGET_ARCH=\"x86_64\""
+          echo "CONFIG_LLVM_TARGETS=\"X86\""
+          echo "CONFIG_USE_LTO_LLVM=y"
+          echo "# O3优化配置"
+          echo "CONFIG_LLVM_OPTIMIZATION_FLAGS=\"-O3 -pipe -march=x86-64-v2\""
+          echo "CONFIG_EXTRA_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
+          echo "CONFIG_TARGET_OPTIMIZATION=\"-O3 -pipe -march=x86-64-v2\""
         } >> .config
 
     - name: Load custom configuration
@@ -154,6 +159,8 @@ jobs:
         make defconfig
         echo "=== LLVM Config Check ==="
         grep "CONFIG.*LLVM" .config || echo "No LLVM config found"
+        echo "=== Optimization Flags ==="
+        grep "OPTIMIZATION" .config || echo "No optimization config found"
         make download -j$(nproc)
         # 清理损坏的下载文件
         find dl -size -1024c -delete
@@ -162,7 +169,7 @@ jobs:
       id: compile
       run: |
         cd openwrt
-        echo "Starting compilation with $(nproc) threads..."
+        echo "Starting O3 optimized compilation with $(nproc) threads..."
         
         # 设置编译环境
         export CC=clang
@@ -196,6 +203,8 @@ jobs:
         cd openwrt
         echo "=== Build Results ==="
         find bin/targets -name "*.img" -o -name "*.gz" -o -name "*.bin" | head -10
+        echo "=== Firmware Size ==="
+        ls -lh bin/targets/*/*/
 
     - name: Organize firmware files
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
@@ -211,7 +220,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success'
       with:
-        name: OpenWrt-LLVM-Firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-LLVM-O3-Firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
         retention-days: 7
 
@@ -221,13 +230,15 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: llvm-build-$(date +%Y%m%d-%H%M)
-        name: LLVM Built OpenWrt $(date +%Y-%m-%d)
+        tag_name: llvm-o3-build-$(date +%Y%m%d-%H%M)
+        name: LLVM O3 Optimized OpenWrt $(date +%Y-%m-%d)
         body: |
-          OpenWrt firmware compiled with LLVM/Clang toolchain
+          OpenWrt firmware compiled with LLVM/Clang toolchain and O3 optimization
           
           - Compiler: Clang ${LLVM_VERSION}
           - Linker: LLD
+          - Optimization: O3 with x86-64-v2
+          - LTO: Enabled
           - Build date: $(date)
         files: ${{ env.FIRMWARE }}/*
 
