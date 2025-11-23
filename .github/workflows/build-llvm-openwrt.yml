@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
 
     - name: Install Complete LLVM/Clang Toolchain
       run: |
@@ -91,7 +91,6 @@ jobs:
 
     - name: Setup LLVM Environment
       run: |
-        echo "设置LLVM环境变量"
         echo "CC=clang" >> $GITHUB_ENV
         echo "CXX=clang++" >> $GITHUB_ENV
         echo "LD=lld" >> $GITHUB_ENV
@@ -113,16 +112,24 @@ jobs:
 
     - name: Load custom feeds
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        if [ -e $FEEDS_CONF ]; then
+          mv $FEEDS_CONF openwrt/feeds.conf.default
+        fi
+        if [ -e $DIY_P1_SH ]; then
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P1_SH
+        fi
 
     - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
 
     - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
+      run: |
+        cd openwrt
+        ./scripts/feeds install -a
 
     - name: Setup Full LLVM Configuration
       run: |
@@ -138,7 +145,7 @@ CONFIG_USE_LLD=y
 CONFIG_KERNEL_LLVM=y
 
 # LLVM 版本和优化
-CONFIG_LLVM_VERSION="$LLVM_VERSION"
+CONFIG_LLVM_VERSION=16
 CONFIG_LLVM_OPTIMIZATION_FLAGS="-O2 -pipe"
 
 # 使用LLVM的binutils替代GNU binutils
@@ -153,16 +160,6 @@ CONFIG_EXTRA_OPTIMIZATION="-O2 -pipe"
 CONFIG_EXTRA_TARGET_ARCH=""
 CONFIG_TARGET_OPTIMIZATION="-O2 -pipe"
 
-# 禁用GCC特定功能
-# CONFIG_GCC_USE_VERSION_11 is not set
-# CONFIG_GCC_USE_VERSION_12 is not set
-
-# 使用libc++替代libstdc++
-# CONFIG_USE_LIBCXX=y
-
-# 启用LLVM LTO（链接时优化）
-# CONFIG_USE_LTO_LLVM=y
-
 # 设置LLVM目标架构
 CONFIG_LLVM_TARGET_ARCH="x86_64"
 CONFIG_LLVM_TARGETS="AArch64;ARM;Mips;PowerPC;RISCV;WebAssembly;X86"
@@ -173,11 +170,17 @@ EOF
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        if [ -e files ]; then
+          mv files openwrt/files
+        fi
+        if [ -e $CONFIG_FILE ]; then
+          mv $CONFIG_FILE openwrt/.config
+        fi
+        if [ -e $DIY_P2_SH ]; then
+          chmod +x $DIY_P2_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P2_SH
+        fi
 
     - name: Verify LLVM Toolchain
       run: |
@@ -207,7 +210,6 @@ EOF
     - name: Compile with LLVM Toolchain
       id: compile
       env:
-        # 设置编译环境使用LLVM
         CC: clang
         CXX: clang++
         LD: ld.lld
@@ -233,7 +235,9 @@ EOF
         
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        if [ -s DEVICE_NAME ]; then
+          echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        fi
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Check LLVM Usage in Build
@@ -249,11 +253,11 @@ EOF
         fi
 
     - name: Check space usage
-      if: (!cancelled())
+      if: always()
       run: df -hT
 
     - name: Upload bin directory
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_LLVM_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -261,7 +265,7 @@ EOF
 
     - name: Organize files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
       run: |
         cd openwrt/bin/targets/*/*
         find . -maxdepth 1 -type f \( -name "*.img" -o -name "*.img.gz" \) ! -name "*combined-efi*" -delete
@@ -270,15 +274,15 @@ EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware directory
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
+      uses: actions/upload-artifact@v4
+      if: steps.organize.outputs.status == 'success'
       with:
         name: OpenWrt_LLVM_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
       run: |
         echo "release_tag=llvm-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         cat > release.txt << 'EOF'
@@ -289,7 +293,7 @@ This firmware is compiled with full LLVM/Clang toolchain:
 - Binutils: LLVM binutils
 - Kernel: Compiled with Clang
 
-LLVM Version: ${{ env.LLVM_VERSION }}
+LLVM Version: 16
 Build Date: $(date)
 EOF
         if [ "$UPLOAD_GOFILE" = "true" ]; then
@@ -298,8 +302,8 @@ EOF
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
-      uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -314,8 +318,8 @@ EOF
         keep_minimum_runs: 2
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      uses: dev-drprasad/delete-older-releases@v0.1.3
+      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
       with:
         keep_latest: 3
         delete_tags: true
