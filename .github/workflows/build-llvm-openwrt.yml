@@ -1,12 +1,12 @@
-name: OpenWrt LLVM Builder
+name: OpenWrt GCC Builder
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/shuangqiao999/openwrt
-  REPO_BRANCH: 24.1
+  REPO_URL: https://github.com/shuangqiao999/openwrtd
+  REPO_BRANCH: openwrt-24.10
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: x86_64_mini.config
   DIY_P1_SH: diy-part1.sh
@@ -24,11 +24,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    - name: Install LLVM/Clang toolchain
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang llvm lld
-
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -39,7 +34,7 @@ jobs:
         # 更新包列表
         sudo apt-get update -y
         
-        # 安装构建依赖
+        # 安装构建依赖（包含GCC工具链）
         sudo apt-get install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
           bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext \
@@ -49,7 +44,7 @@ jobs:
           libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch \
           pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
           rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
-          vim wget xmlto xxd zlib1g-dev
+          vim wget xmlto xxd zlib1g-dev gcc g++ make
         
         # 清理包缓存
         sudo apt-get autoremove -y
@@ -81,14 +76,6 @@ jobs:
 
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
-
-    - name: Setup LLVM/Clang configuration
-      run: |
-        echo "启用LLVM/Clang编译选项"
-        cd openwrt
-        grep -q "CONFIG_USE_LLVM" .config || echo "CONFIG_USE_LLVM=y" >> .config
-        grep -q "CONFIG_USE_LLD" .config || echo "CONFIG_USE_LLD=y" >> .config
-        grep -q "CONFIG_KERNEL_LLVM" .config || echo "CONFIG_KERNEL_LLVM=y" >> .config
 
     - name: Load custom configuration
       run: |
