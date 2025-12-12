@@ -44,7 +44,7 @@ jobs:
           libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch \
           pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils \
           rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
-          vim wget xmlto xxd zlib1g-dev gcc g++ make
+          vim wget xmlto xxd zlib1g-dev gcc g++ make tree
         
         # 清理包缓存
         sudo apt-get autoremove -y
@@ -85,25 +85,136 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    # ======================
+    # 保存编译前的初始配置
+    # ======================
+    - name: Save initial configuration
+      id: save_initial_config
+      run: |
+        cd openwrt
+        # 保存原始配置
+        cp .config .config.initial
+        # 将配置复制到工作空间
+        cp .config $GITHUB_WORKSPACE/config.initial
+        
+        echo "保存初始配置完成"
+        echo "config_initial=config.initial" >> $GITHUB_OUTPUT
+
     - name: Download package
       id: package
       run: |
         cd openwrt
+        # 执行defconfig，这会自动解析依赖
         make defconfig
+        # 保存defconfig后的配置
+        cp .config .config.defconfig
+        cp .config $GITHUB_WORKSPACE/config.defconfig
+        
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
+    # ======================
+    # 保存完整的编译配置
+    # ======================
+    - name: Save complete build configuration
+      id: save_complete_config
+      run: |
+        cd openwrt
+        echo "====== 保存完整编译配置 ======"
+        
+        # 1. 保存最终的.config文件
+        cp .config $GITHUB_WORKSPACE/config.final
+        echo "最终配置已保存到 config.final"
+        
+        # 2. 生成配置差异对比（与初始配置对比）
+        if [ -f .config.initial ] && [ -f .config ]; then
+          diff -u .config.initial .config > $GITHUB_WORKSPACE/config.diff || true
+          echo "配置差异已保存到 config.diff"
+        fi
+        
+        # 3. 提取所有激活的配置项
+        grep '^CONFIG_' .config | sort > $GITHUB_WORKSPACE/config.activated
+        echo "激活的配置项已保存到 config.activated"
+        
+        # 4. 提取所有包配置
+        grep '^CONFIG_PACKAGE_' .config | sort > $GITHUB_WORKSPACE/config.packages
+        echo "包配置已保存到 config.packages"
+        
+        # 5. 生成配置摘要
+        echo "====== 配置摘要 ======" > $GITHUB_WORKSPACE/config.summary
+        echo "总配置项数: $(grep -c '^CONFIG_' .config)" >> $GITHUB_WORKSPACE/config.summary
+        echo "激活包数: $(grep -c '^CONFIG_PACKAGE.*=y' .config)" >> $GITHUB_WORKSPACE/config.summary
+        echo "模块化包数: $(grep -c '^CONFIG_PACKAGE.*=m' .config)" >> $GITHUB_WORKSPACE/config.summary
+        echo "禁用包数: $(grep -c '^# CONFIG_PACKAGE' .config)" >> $GITHUB_WORKSPACE/config.summary
+        
+        # 6. 保存内核配置（如果有）
+        if [ -f .config ]; then
+          # 提取内核配置相关项
+          grep -E '^(CONFIG_|# CONFIG_)' .config | grep -v '^CONFIG_PACKAGE' > $GITHUB_WORKSPACE/config.kernel || true
+          echo "内核配置已保存到 config.kernel"
+        fi
+        
+        # 7. 列出所有配置阶段文件
+        echo "配置阶段文件:" >> $GITHUB_WORKSPACE/config.summary
+        ls -la .config* >> $GITHUB_WORKSPACE/config.summary
+        
+        echo "保存完成"
+
+    - name: Upload configuration files
+      uses: actions/upload-artifact@main
+      with:
+        name: OpenWrt_Configuration_Files
+        path: |
+          ${{ github.workspace }}/config.*
+          openwrt/.config*
+        retention-days: 7
 
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
+        
+        # 编译前再次保存配置
+        cp .config .config.before_compile
+        
         make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    # ======================
+    # 编译后分析配置
+    # ======================
+    - name: Analyze post-build configuration
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt
+        
+        # 保存编译后的配置（可能被修改过）
+        if [ -f .config ]; then
+          cp .config $GITHUB_WORKSPACE/config.post_build
+          echo "编译后配置已保存"
+        fi
+        
+        # 生成包依赖树
+        if command -v tree &> /dev/null; then
+          find bin -name "*.ipk" -type f | sort > $GITHUB_WORKSPACE/ipk_list.txt
+          echo "IPK包列表已生成"
+        fi
+        
+        # 显示配置变化
+        echo "====== 配置变化分析 ======" > $GITHUB_WORKSPACE/config.analysis
+        if [ -f .config.initial ] && [ -f .config ]; then
+          echo "新增的配置项:" >> $GITHUB_WORKSPACE/config.analysis
+          grep '^CONFIG_' .config | grep -Fvxf <(grep '^CONFIG_' .config.initial) >> $GITHUB_WORKSPACE/config.analysis || true
+          
+          echo "" >> $GITHUB_WORKSPACE/config.analysis
+          echo "移除的配置项:" >> $GITHUB_WORKSPACE/config.analysis
+          grep '^CONFIG_' .config.initial | grep -Fvxf <(grep '^CONFIG_' .config) >> $GITHUB_WORKSPACE/config.analysis || true
+        fi
 
     - name: Check space usage
       if: (!cancelled())
@@ -125,6 +236,20 @@ jobs:
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+
+    # ======================
+    # 上传所有配置文件
+    # ======================
+    - name: Upload all configuration artifacts
+      uses: actions/upload-artifact@main
+      if: always()
+      with:
+        name: Complete_Configurations_${{ env.FILE_DATE }}
+        path: |
+          ${{ github.workspace }}/config.*
+          openwrt/.config*
+          openwrt/feeds.conf.default
+        retention-days: 30
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
