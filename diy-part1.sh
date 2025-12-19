@@ -19,3 +19,14 @@
 # Lienol/openwrt-package
 # sed -i '$a src-git lienol https://github.com/Lancenas/lienol-openwrt-package.git' feeds.conf.default
 # sed -i '$a src-git xiaorouji https://github.com/xiaorouji/openwrt-passwall-packages.git' feeds.conf.default
+
+
+# 清除opkg相关缓存
+rm -rf /workdir/openwrt/dl/opkg-2025.11.05~80503d94.tar.zst
+rm -rf /workdir/openwrt/tmp/dl/opkg-2025.11.05~80503d94
+
+# 重新构建opkg
+cd /workdir/openwrt
+make package/system/opkg/clean
+make package/system/opkg/download
+make package/system/opkg/compile
